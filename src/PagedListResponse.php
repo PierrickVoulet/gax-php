@@ -45,7 +45,7 @@ use IteratorAggregate;
  *
  * The list elements can be accessed in the following ways:
  *  - As a single iterable used in a foreach loop or via the getIterator method
- *  - As pages of elements, using the getPage and iteratePages methods
+ *  - As pages of elements using methods such as getFirstPage, getPage, nextPage, previousPage or iteratePages
  *  - As fixed size collections of elements, using the
  *    getFixedSizeCollection and iterateFixedSizeCollections methods
  *
@@ -67,21 +67,25 @@ use IteratorAggregate;
  * }
  * ```
  *
- * Example of accessing the current page, and manually iterating
- * over pages:
+ * Example of accessing the first page, and manually iterating
+ * over pages in the next and previous order:
  * ```
  * $pagedListResponse = $client->getList(...);
- * $page = $pagedListResponse->getPage();
+ * $page = $pagedListResponse->getFirstPage();
  * // doSomethingWith($page);
- * while ($page->hasNextPage()) {
- *     $page = $page->getNextPage();
- *     // doSomethingWith($page);
+ * while ($pagedListResponse->hasNextPage()) {
+ *     $pagedListResponse->nextPage();
+ *     // doSomethingWith($pagedListResponse->getPage());
+ * }
+ * while ($pagedListResponse->hasPreviousPage()) {
+ *     // doSomethingWith($pagedListResponse->previousPage());
  * }
  * ```
  */
 class PagedListResponse implements IteratorAggregate
 {
     private $firstPage;
+    private $currentPage;
 
     /**
      * PagedListResponse constructor.
@@ -92,6 +96,7 @@ class PagedListResponse implements IteratorAggregate
         Page $firstPage
     ) {
         $this->firstPage = $firstPage;
+        $this->currentPage = $firstPage;
     }
 
     /**
@@ -131,17 +136,7 @@ class PagedListResponse implements IteratorAggregate
     }
 
     /**
-     * Return the current page of results.
-     *
-     * @return Page
-     */
-    public function getPage()
-    {
-        return $this->firstPage;
-    }
-
-    /**
-     * Returns an iterator over pages of results. The pages are
+     * Returns an iterator over all pages of results. The pages are
      * retrieved lazily from the underlying API.
      *
      * @return Page[]
@@ -149,7 +144,7 @@ class PagedListResponse implements IteratorAggregate
      */
     public function iteratePages()
     {
-        return $this->getPage()->iteratePages();
+        return $this->getFirstPage()->iteratePages();
     }
 
     /**
@@ -169,7 +164,7 @@ class PagedListResponse implements IteratorAggregate
      */
     public function expandToFixedSizeCollection($collectionSize)
     {
-        return $this->getPage()->expandToFixedSizeCollection($collectionSize);
+        return $this->getFirstPage()->expandToFixedSizeCollection($collectionSize);
     }
 
     /**
@@ -192,5 +187,78 @@ class PagedListResponse implements IteratorAggregate
     public function iterateFixedSizeCollections($collectionSize)
     {
         return $this->expandToFixedSizeCollection($collectionSize)->iterateCollections();
+    }
+
+    /**
+     * Return the current page of results.
+     *
+     * @return Page
+     */
+    public function getPage()
+    {
+        return $this->currentPage;
+    }
+
+    /**
+     * Return the first page of results.
+     *
+     * @return Page
+     */
+    public function getFirstPage()
+    {
+        return $this->firstPage;
+    }
+
+    /**
+     * Set the current pointer to the first page of results.
+     *
+     * @return Page
+     */
+    public function firstPage()
+    {
+        $this->currentPage = $this->firstPage;
+        return $this->currentPage;
+    }
+
+    /**
+     * Set the current pointer to the next page of results and return it.
+     *
+     * @return Page
+     */
+    public function nextPage()
+    {
+        $this->currentPage = $this->currentPage->getNextPage();
+        return $this->currentPage;
+    }
+
+    /**
+     * Set the current pointer to the previous page of results and return it.
+     *
+     * @return Page
+     */
+    public function previousPage()
+    {
+        $this->currentPage = $this->currentPage->getPreviousPage();
+        return $this->currentPage;
+    }
+
+    /**
+     * Returns true if there is a next page.
+     *
+     * @return bool
+     */
+    public function hasNextPage()
+    {
+        return $this->currentPage->hasNextPage();
+    }
+
+    /**
+     * Returns true if there is a previous page.
+     *
+     * @return bool
+     */
+    public function hasPreviousPage()
+    {
+        return $this->currentPage->hasPreviousPage();
     }
 }

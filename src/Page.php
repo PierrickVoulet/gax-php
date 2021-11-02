@@ -49,6 +49,7 @@ class Page implements IteratorAggregate
     private $options;
     private $pageStreamingDescriptor;
 
+    private $previousPageTokens = [];
     private $pageToken;
 
     private $response;
@@ -61,13 +62,15 @@ class Page implements IteratorAggregate
      * @param callable $callable
      * @param PageStreamingDescriptor $pageStreamingDescriptor
      * @param Message $response
+     * @param array|null $previousPageTokens
      */
     public function __construct(
         Call $call,
         array $options,
         callable $callable,
         PageStreamingDescriptor $pageStreamingDescriptor,
-        Message $response
+        Message $response,
+        array $previousPageTokens = []
     ) {
         $this->call = $call;
         $this->options = $options;
@@ -77,6 +80,7 @@ class Page implements IteratorAggregate
 
         $requestPageTokenGetMethod = $this->pageStreamingDescriptor->getRequestPageTokenGetMethod();
         $this->pageToken = $this->call->getMessage()->$requestPageTokenGetMethod();
+        $this->previousPageTokens = $previousPageTokens;
     }
 
     /**
@@ -91,6 +95,16 @@ class Page implements IteratorAggregate
     }
 
     /**
+     * Returns true if there is a previous page that can be retrieved from the API.
+     *
+     * @return bool
+     */
+    public function hasPreviousPage()
+    {
+        return !empty($this->previousPageTokens);
+    }
+
+    /**
      * Returns the next page token from the response.
      *
      * @return string
@@ -102,11 +116,30 @@ class Page implements IteratorAggregate
     }
 
     /**
+     * Returns the previous page token.
+     *
+     * @throws ValidationException if there are no pages remaining
+     * @return string
+     */
+    public function getPreviousPageToken()
+    {
+        if (!$this->hasPreviousPage()) {
+            throw new ValidationException(
+                'Could not complete getPreviousPageToken operation: ' .
+                'there are no more pages to retrieve.'
+            );
+        }
+
+        $previousToken = end($this->previousPageToken);
+        reset($this->previousPageToken);
+        return $previousToken;
+    }
+
+    /**
      * Retrieves the next Page object using the next page token.
      *
      * @param int|null $pageSize
-     * @throws ValidationException if there are no pages remaining, or if pageSize is supplied but
-     * is not supported by the API
+     * @throws ValidationException if there are no pages remaining
      * @throws ApiException if the call to fetch the next page fails.
      * @return Page
      */
@@ -119,13 +152,68 @@ class Page implements IteratorAggregate
             );
         }
 
+        $previousPageTokens = $this->previousPageTokens;
+        $response = $this->getPageByToken($this->getNextPageToken(), $pageSize);
+
+        $previousPageTokens[] = $this->pageToken;
+        return new Page(
+            $this->call,
+            $this->options,
+            $this->callable,
+            $this->pageStreamingDescriptor,
+            $response,
+            $previousPageTokens
+        );
+    }
+
+    /**
+     * Retrieves the previous Page object using the previous page token.
+     *
+     * @param int|null $pageSize
+     * @throws ValidationException if there are no pages remaining
+     * @throws ApiException if the call to fetch the previous page fails.
+     * @return Page
+     */
+    public function getPreviousPage($pageSize = null)
+    {
+        if (!$this->hasPreviousPage()) {
+            throw new ValidationException(
+                'Could not complete getPreviousPage operation: ' .
+                'there are no more pages to retrieve.'
+            );
+        }
+
+        $previousPageTokens = $this->previousPageTokens;
+        $response = $this->getPageByToken(array_pop($previousPageTokens), $pageSize);
+
+        return new Page(
+            $this->call,
+            $this->options,
+            $this->callable,
+            $this->pageStreamingDescriptor,
+            $response,
+            $previousPageTokens
+        );
+    }
+
+    /**
+     * Retrieves the Page object using the page token.
+     *
+     * @param string $pageToken
+     * @param int|null $pageSize
+     * @throws ValidationException if pageSize is supplied but is not supported by the API
+     * @throws ApiException if the call to fetch the page fails.
+     * @return Page
+     */
+    public function getPageByToken(string $pageToken, $pageSize = null)
+    {
         $oldRequest = $this->getRequestObject();
         $requestClass = get_class($oldRequest);
         $newRequest = new $requestClass();
         $newRequest->mergeFrom($oldRequest);
 
         $requestPageTokenSetMethod = $this->pageStreamingDescriptor->getRequestPageTokenSetMethod();
-        $newRequest->$requestPageTokenSetMethod($this->getNextPageToken());
+        $newRequest->$requestPageTokenSetMethod($pageToken);
 
         if (isset($pageSize)) {
             if (!$this->pageStreamingDescriptor->requestHasPageSizeField()) {
@@ -140,18 +228,10 @@ class Page implements IteratorAggregate
         $this->call = $this->call->withMessage($newRequest);
 
         $callable = $this->callable;
-        $response = $callable(
+        return $callable(
             $this->call,
             $this->options
         )->wait();
-
-        return new Page(
-            $this->call,
-            $this->options,
-            $this->callable,
-            $this->pageStreamingDescriptor,
-            $response
-        );
     }
 
     /**
